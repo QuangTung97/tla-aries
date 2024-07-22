@@ -28,7 +28,7 @@ flush_vars == <<flush_page, flush_page_data, flush_page_lsn>>
 max_buffer_len == 2
 mem_log_size == 2
 disk_log_size == 3
-max_fail_count == 3
+max_fail_count == 4
 
 ARIESConstraint ==
     /\ mem_log_end <= 6
@@ -103,7 +103,6 @@ FixPage(p) ==
 EvictPage(p) ==
     /\ p \in buffer
     /\ ~(p \in dirty)
-    /\ p /= flush_page
     /\ buffer' = buffer \ {p}
     /\ UNCHANGED dirty
     /\ UNCHANGED disk_vars

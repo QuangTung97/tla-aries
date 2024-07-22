@@ -27,14 +27,16 @@ flush_vars == <<flush_page, flush_page_data, flush_page_lsn>>
 
 max_buffer_len == 2
 mem_log_size == 2
-disk_log_size == 3
-max_fail_count == 4
-
-ARIESConstraint ==
-    /\ mem_log_end <= 6
-    /\ fail_count < max_fail_count
+disk_log_size == 4
+max_fail_count == 3
+lsn_max == 6
 
 null == "nil"
+
+Terminated ==
+    /\ disk_log_end >= lsn_max
+    /\ fail_count >= max_fail_count
+    /\ buffer = {}
 
 
 TypeOK ==
@@ -166,6 +168,8 @@ RecoverFinish ==
 
 Update(p) ==
     /\ ~recovering
+    /\ mem_log_end < lsn_max
+    /\ (mem_log_end + 1 - disk_log_start) < disk_log_size
     /\ p \in buffer
     /\ MemLogAvail
     /\ log' = Append(log, p)
@@ -239,6 +243,7 @@ FlushPage ==
 
 
 SystemFail ==
+    /\ fail_count < max_fail_count
     /\ fail_count' = fail_count + 1
     /\ recovering' = TRUE
     /\ mem_page_lsn' = [p \in Page |-> 0]
@@ -259,7 +264,6 @@ Checkpoint ==
     \E lsn \in (disk_log_start + 1)..(disk_log_end + 1):
         /\ ~recovering
         /\ \A p \in dirty: mem_rec_lsn[p] >= lsn
-        /\ flush_page /= null => flush_page_lsn >= lsn
         /\ disk_log_start' = lsn
         /\ UNCHANGED mem_vars
         /\ UNCHANGED disk_log_end
@@ -313,6 +317,8 @@ Consistency ==
     /\ ~recovering => DataConsistent
     /\ mem_log_end - mem_log_start + 1 <= mem_log_size
     /\ Cardinality(buffer) <= max_buffer_len
+    /\ (mem_log_end < disk_log_start) => dirty = {}
+    /\ dirty \subseteq buffer
 
 
 Perms == Permutations(Page)

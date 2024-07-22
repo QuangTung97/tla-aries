@@ -102,6 +102,7 @@ FixPage(p) ==
 EvictPage(p) ==
     /\ p \in buffer
     /\ ~(p \in dirty)
+    /\ p /= flush_page
     /\ buffer' = buffer \ {p}
     /\ UNCHANGED dirty
     /\ UNCHANGED disk_vars
@@ -198,7 +199,6 @@ TrimLogBuffer(index) ==
 
 
 PrepareFlush(p) ==
-    /\ ~recovering
     /\ p \in buffer
     /\ p \in dirty
     /\ dirty' = dirty \ {p}
@@ -217,7 +217,6 @@ PrepareFlush(p) ==
 
 FlushPage ==
     LET p == flush_page IN
-        /\ ~recovering
         /\ p /= null
         /\ flush_page_lsn <= disk_log_end
         /\ disk_page' = [disk_page EXCEPT ![p] = flush_page_data]
@@ -293,5 +292,6 @@ DataConsistent ==
 
 Consistency ==
     /\ ~recovering => DataConsistent
+    /\ mem_log_end - mem_log_start + 1 <= mem_log_size
 
 ====

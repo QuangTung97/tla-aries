@@ -326,4 +326,11 @@ Consistency ==
 
 Perms == Permutations(Page)
 
+
+AlwaysIncrease == [][disk_log_end' > disk_log_end]_{disk_log_end}
+
+LogSubSeq == SubSeq(log', 1, disk_log_end) = SubSeq(log, 1, disk_log_end)
+
+AlwaysIsSubSeq == [][LogSubSeq]_{log}
+
 ====

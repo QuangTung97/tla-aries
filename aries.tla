@@ -193,6 +193,7 @@ SyncLog(index) ==
 
 
 TrimLogBuffer(index) ==
+    /\ index <= mem_log_end + 1
     /\ mem_log_start' = index
     /\ UNCHANGED <<mem_log_end, mem_page, mem_page_lsn, mem_rec_lsn>>
     /\ UNCHANGED <<buffer, dirty>>
@@ -319,6 +320,8 @@ Consistency ==
     /\ Cardinality(buffer) <= max_buffer_len
     /\ (mem_log_end < disk_log_start) => dirty = {}
     /\ dirty \subseteq buffer
+    /\ mem_log_start <= mem_log_end + 1
+    /\ disk_log_start <= disk_log_end + 1
 
 
 Perms == Permutations(Page)

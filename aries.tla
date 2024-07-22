@@ -26,12 +26,13 @@ disk_vars == <<disk_page, disk_page_lsn,
 flush_vars == <<flush_page, flush_page_data, flush_page_lsn>>
 
 max_buffer_len == 2
-mem_log_size == 3
+mem_log_size == 2
+disk_log_size == 3
 max_fail_count == 3
 
 ARIESConstraint ==
-    /\ mem_log_end <= 4
-    /\ fail_count < 2
+    /\ mem_log_end <= 6
+    /\ fail_count < max_fail_count
 
 null == "nil"
 
@@ -180,6 +181,7 @@ Update(p) ==
 
 
 SyncLog(index) ==
+    /\ index - disk_log_start + 1 <= disk_log_size
     /\ disk_log_end' = index
     /\ UNCHANGED mem_vars
     /\ UNCHANGED <<disk_log_start, disk_page, disk_page_lsn>>
@@ -201,13 +203,13 @@ TrimLogBuffer(index) ==
 PrepareFlush(p) ==
     /\ p \in buffer
     /\ p \in dirty
-    /\ dirty' = dirty \ {p}
     /\ flush_page = null
     /\ flush_page' = p
     /\ flush_page_data' = mem_page[p]
     /\ flush_page_lsn' = mem_page_lsn[p]
     /\ UNCHANGED <<mem_log_start, mem_log_end>>
     /\ UNCHANGED buffer
+    /\ UNCHANGED dirty
     /\ UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn>>
     /\ UNCHANGED disk_vars
     /\ UNCHANGED log
@@ -224,9 +226,13 @@ FlushPage ==
         /\ flush_page' = null
         /\ flush_page_data' = <<>>
         /\ flush_page_lsn' = 0
-        /\ UNCHANGED <<buffer, dirty>>
+        /\ mem_rec_lsn' = [mem_rec_lsn EXCEPT ![p] = flush_page_lsn + 1]
+        /\ IF mem_page_lsn[p] = flush_page_lsn
+            THEN dirty' = dirty \ {p}
+            ELSE UNCHANGED dirty
+        /\ UNCHANGED buffer
         /\ UNCHANGED <<mem_log_start, mem_log_end>>
-        /\ UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn>>
+        /\ UNCHANGED <<mem_page, mem_page_lsn>>
         /\ UNCHANGED <<disk_log_start, disk_log_end>>
         /\ UNCHANGED log
         /\ UNCHANGED recovering
@@ -240,14 +246,27 @@ SystemFail ==
     /\ mem_page' = [p \in Page |-> <<>>]
     /\ mem_rec_lsn' = [p \in Page |-> 0]
     /\ dirty' = {}
-    /\ mem_log_start' = 1
-    /\ mem_log_end' = 0
+    /\ mem_log_start' = disk_log_start
+    /\ mem_log_end' = disk_log_start - 1
     /\ buffer' = {}
     /\ flush_page' = null
     /\ flush_page_data' = <<>>
     /\ flush_page_lsn' = 0
     /\ log' = SubSeq(log, 1, disk_log_end) \* trim log
     /\ UNCHANGED disk_vars
+
+
+Checkpoint ==
+    \E lsn \in (disk_log_start + 1)..(disk_log_end + 1):
+        /\ ~recovering
+        /\ \A p \in dirty: mem_rec_lsn[p] >= lsn
+        /\ flush_page /= null => flush_page_lsn >= lsn
+        /\ disk_log_start' = lsn
+        /\ UNCHANGED mem_vars
+        /\ UNCHANGED disk_log_end
+        /\ UNCHANGED <<disk_page, disk_page_lsn>>
+        /\ UNCHANGED fail_count
+        /\ UNCHANGED log
 
 
 Next ==
@@ -262,6 +281,7 @@ Next ==
     \/ \E index \in (mem_log_start + 1)..(disk_log_end + 1): TrimLogBuffer(index)
     \/ FlushPage
     \/ SystemFail
+    \/ Checkpoint
 
 
 InSeq(e, s) ==
@@ -293,5 +313,9 @@ DataConsistent ==
 Consistency ==
     /\ ~recovering => DataConsistent
     /\ mem_log_end - mem_log_start + 1 <= mem_log_size
+    /\ Cardinality(buffer) <= max_buffer_len
+
+
+Perms == Permutations(Page)
 
 ====

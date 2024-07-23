@@ -5,18 +5,18 @@ CONSTANTS Page
 
 VARIABLES mem_page, mem_page_lsn, mem_rec_lsn, dirty,
     disk_page, disk_page_lsn,
-    mem_log_start, mem_log_end, disk_log_start, disk_log_end,
+    mem_log_end, disk_log_start, disk_log_end,
     buffer, flush_page, flush_page_data, flush_page_lsn,
     recovering, log, fail_count
 
 vars == <<mem_page, mem_page_lsn, mem_rec_lsn, dirty,
     disk_page, disk_page_lsn,
-    mem_log_start, mem_log_end, disk_log_start, disk_log_end,
+    mem_log_end, disk_log_start, disk_log_end,
     buffer, flush_page, flush_page_data, flush_page_lsn,
     recovering, log, fail_count>>
 
 mem_vars == <<mem_page, mem_page_lsn, mem_rec_lsn, dirty,
-    mem_log_start, mem_log_end, buffer,
+    mem_log_end, buffer,
     flush_page, flush_page_data, flush_page_lsn,
     recovering>>
 
@@ -46,7 +46,6 @@ TypeOK ==
     /\ dirty \in SUBSET Page
     /\ disk_page_lsn \in [Page -> Nat]
     /\ disk_page \in [Page -> Seq(Nat)]
-    /\ mem_log_start \in Nat
     /\ mem_log_end \in Nat
     /\ disk_log_start \in Nat
     /\ disk_log_end \in Nat
@@ -65,7 +64,6 @@ InitMem ==
     /\ mem_page = [p \in Page |-> <<>>]
     /\ mem_rec_lsn = [p \in Page |-> 0]
     /\ dirty = {}
-    /\ mem_log_start = 1
     /\ mem_log_end = 1
     /\ buffer = {}
     /\ flush_page = null
@@ -99,7 +97,7 @@ FixPage(p) ==
     /\ UNCHANGED recovering
     /\ UNCHANGED log
     /\ UNCHANGED fail_count
-    /\ UNCHANGED <<mem_log_start, mem_log_end>>
+    /\ UNCHANGED mem_log_end
 
 
 EvictPage(p) ==
@@ -110,13 +108,13 @@ EvictPage(p) ==
     /\ UNCHANGED disk_vars
     /\ UNCHANGED flush_vars
     /\ UNCHANGED log
-    /\ UNCHANGED <<mem_log_start, mem_log_end>>
+    /\ UNCHANGED mem_log_end
     /\ UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn>>
     /\ UNCHANGED recovering
     /\ UNCHANGED fail_count
 
 
-MemLogAvail == mem_log_end - mem_log_start < mem_log_size
+MemLogAvail == mem_log_end - disk_log_end < mem_log_size
 
 
 SetPage(p, lsn) ==
@@ -141,7 +139,7 @@ DoRecover ==
         /\ IF mem_log_end > mem_page_lsn[p]
             THEN SetPage(p, mem_log_end)
             ELSE UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn, dirty>>
-    /\ UNCHANGED <<buffer, mem_log_start>>
+    /\ UNCHANGED buffer
     /\ UNCHANGED recovering
     /\ UNCHANGED flush_vars
     /\ UNCHANGED log
@@ -162,7 +160,7 @@ RecoverFinish ==
     /\ UNCHANGED flush_vars
     /\ UNCHANGED log
     /\ UNCHANGED fail_count
-    /\ UNCHANGED <<mem_log_start, mem_log_end>>
+    /\ UNCHANGED mem_log_end
     /\ UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn>>
 
 
@@ -175,7 +173,6 @@ Update(p) ==
     /\ log' = Append(log, p)
     /\ mem_log_end' = mem_log_end + 1
     /\ SetPage(p, mem_log_end)
-    /\ UNCHANGED mem_log_start
     /\ UNCHANGED flush_vars
     /\ UNCHANGED buffer
     /\ UNCHANGED recovering
@@ -192,17 +189,6 @@ SyncLog(index) ==
     /\ UNCHANGED fail_count
 
 
-TrimLogBuffer(index) ==
-    /\ index <= mem_log_end
-    /\ mem_log_start' = index
-    /\ UNCHANGED <<mem_log_end, mem_page, mem_page_lsn, mem_rec_lsn>>
-    /\ UNCHANGED <<buffer, dirty>>
-    /\ UNCHANGED flush_vars
-    /\ UNCHANGED disk_vars
-    /\ UNCHANGED recovering
-    /\ UNCHANGED fail_count
-    /\ UNCHANGED log
-
 
 PrepareFlush(p) ==
     /\ p \in buffer
@@ -211,7 +197,7 @@ PrepareFlush(p) ==
     /\ flush_page' = p
     /\ flush_page_data' = mem_page[p]
     /\ flush_page_lsn' = mem_page_lsn[p]
-    /\ UNCHANGED <<mem_log_start, mem_log_end>>
+    /\ UNCHANGED mem_log_end
     /\ UNCHANGED buffer
     /\ UNCHANGED dirty
     /\ UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn>>
@@ -235,7 +221,7 @@ FlushPage ==
             THEN dirty' = dirty \ {p}
             ELSE UNCHANGED dirty
         /\ UNCHANGED buffer
-        /\ UNCHANGED <<mem_log_start, mem_log_end>>
+        /\ UNCHANGED mem_log_end
         /\ UNCHANGED <<mem_page, mem_page_lsn>>
         /\ UNCHANGED <<disk_log_start, disk_log_end>>
         /\ UNCHANGED log
@@ -251,7 +237,6 @@ SystemFail ==
     /\ mem_page' = [p \in Page |-> <<>>]
     /\ mem_rec_lsn' = [p \in Page |-> 0]
     /\ dirty' = {}
-    /\ mem_log_start' = disk_log_start
     /\ mem_log_end' = disk_log_start
     /\ buffer' = {}
     /\ flush_page' = null
@@ -282,7 +267,6 @@ Next ==
         \/ PrepareFlush(p)
         \/ EvictPage(p)
     \/ \E index \in (disk_log_end + 1)..mem_log_end: SyncLog(index)
-    \/ \E index \in (mem_log_start + 1)..(disk_log_end + 1): TrimLogBuffer(index)
     \/ FlushPage
     \/ SystemFail
     \/ Checkpoint
@@ -316,12 +300,11 @@ DataConsistent ==
 
 Consistency ==
     /\ ~recovering => DataConsistent
-    /\ mem_log_end - mem_log_start <= mem_log_size
+    /\ mem_log_end - disk_log_end <= mem_log_size
     /\ Cardinality(buffer) <= max_buffer_len
-    /\ (mem_log_end <= disk_log_start) => dirty = {} \* TODO check actual smaller
+    /\ (mem_log_end <= disk_log_start) => dirty = {}
     /\ ~(mem_log_end < disk_log_start)
     /\ dirty \subseteq buffer
-    /\ mem_log_start <= mem_log_end
     /\ disk_log_start <= disk_log_end
 
 

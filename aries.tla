@@ -191,7 +191,6 @@ SyncLog(index) ==
 
 
 PrepareFlush(p) ==
-    /\ p \in buffer
     /\ p \in dirty
     /\ flush_page = null
     /\ flush_page' = p

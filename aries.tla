@@ -28,7 +28,7 @@ flush_vars == <<flush_page, flush_page_data, flush_page_lsn>>
 max_buffer_len == 2
 mem_log_size == 2
 disk_log_size == 4
-max_fail_count == 3
+max_fail_count == 4
 lsn_max == 6
 
 null == "nil"
@@ -66,7 +66,7 @@ InitMem ==
     /\ mem_rec_lsn = [p \in Page |-> 0]
     /\ dirty = {}
     /\ mem_log_start = 1
-    /\ mem_log_end = 0
+    /\ mem_log_end = 1
     /\ buffer = {}
     /\ flush_page = null
     /\ flush_page_data = <<>>
@@ -79,7 +79,7 @@ Init ==
     /\ disk_page_lsn = [p \in Page |-> 0]
     /\ disk_page = [p \in Page |-> <<>>]
     /\ disk_log_start = 1
-    /\ disk_log_end = 0
+    /\ disk_log_end = 1
     /\ log = <<>>
 
 
@@ -116,7 +116,7 @@ EvictPage(p) ==
     /\ UNCHANGED fail_count
 
 
-MemLogAvail == mem_log_end + 1 - mem_log_start < mem_log_size
+MemLogAvail == mem_log_end - mem_log_start < mem_log_size
 
 
 SetPage(p, lsn) ==
@@ -136,10 +136,10 @@ DoRecover ==
     /\ mem_log_end < disk_log_end
     /\ MemLogAvail
     /\ mem_log_end' = mem_log_end + 1
-    /\ LET p == log[mem_log_end'] IN
+    /\ LET p == log[mem_log_end] IN
         /\ p \in buffer
-        /\ IF mem_log_end' > mem_page_lsn[p]
-            THEN SetPage(p, mem_log_end')
+        /\ IF mem_log_end > mem_page_lsn[p]
+            THEN SetPage(p, mem_log_end)
             ELSE UNCHANGED <<mem_page, mem_page_lsn, mem_rec_lsn, dirty>>
     /\ UNCHANGED <<buffer, mem_log_start>>
     /\ UNCHANGED recovering
@@ -168,13 +168,13 @@ RecoverFinish ==
 
 Update(p) ==
     /\ ~recovering
-    /\ mem_log_end < lsn_max
-    /\ (mem_log_end + 1 - disk_log_start) < disk_log_size
+    /\ mem_log_end <= lsn_max
+    /\ (mem_log_end - disk_log_start) < disk_log_size
     /\ p \in buffer
     /\ MemLogAvail
     /\ log' = Append(log, p)
     /\ mem_log_end' = mem_log_end + 1
-    /\ SetPage(p, mem_log_end')
+    /\ SetPage(p, mem_log_end)
     /\ UNCHANGED mem_log_start
     /\ UNCHANGED flush_vars
     /\ UNCHANGED buffer
@@ -184,7 +184,7 @@ Update(p) ==
 
 
 SyncLog(index) ==
-    /\ index - disk_log_start + 1 <= disk_log_size
+    /\ index - disk_log_start <= disk_log_size
     /\ disk_log_end' = index
     /\ UNCHANGED mem_vars
     /\ UNCHANGED <<disk_log_start, disk_page, disk_page_lsn>>
@@ -193,7 +193,7 @@ SyncLog(index) ==
 
 
 TrimLogBuffer(index) ==
-    /\ index <= mem_log_end + 1
+    /\ index <= mem_log_end
     /\ mem_log_start' = index
     /\ UNCHANGED <<mem_log_end, mem_page, mem_page_lsn, mem_rec_lsn>>
     /\ UNCHANGED <<buffer, dirty>>
@@ -224,7 +224,7 @@ PrepareFlush(p) ==
 FlushPage ==
     LET p == flush_page IN
         /\ p /= null
-        /\ flush_page_lsn <= disk_log_end
+        /\ flush_page_lsn < disk_log_end
         /\ disk_page' = [disk_page EXCEPT ![p] = flush_page_data]
         /\ disk_page_lsn' = [disk_page_lsn EXCEPT ![p] = flush_page_lsn]
         /\ flush_page' = null
@@ -252,17 +252,17 @@ SystemFail ==
     /\ mem_rec_lsn' = [p \in Page |-> 0]
     /\ dirty' = {}
     /\ mem_log_start' = disk_log_start
-    /\ mem_log_end' = disk_log_start - 1
+    /\ mem_log_end' = disk_log_start
     /\ buffer' = {}
     /\ flush_page' = null
     /\ flush_page_data' = <<>>
     /\ flush_page_lsn' = 0
-    /\ log' = SubSeq(log, 1, disk_log_end) \* trim log
+    /\ log' = SubSeq(log, 1, disk_log_end - 1) \* trim log
     /\ UNCHANGED disk_vars
 
 
 Checkpoint ==
-    \E lsn \in (disk_log_start + 1)..(disk_log_end + 1):
+    \E lsn \in (disk_log_start + 1)..disk_log_end:
         /\ ~recovering
         /\ \A p \in dirty: mem_rec_lsn[p] >= lsn
         /\ disk_log_start' = lsn
@@ -316,12 +316,13 @@ DataConsistent ==
 
 Consistency ==
     /\ ~recovering => DataConsistent
-    /\ mem_log_end - mem_log_start + 1 <= mem_log_size
+    /\ mem_log_end - mem_log_start <= mem_log_size
     /\ Cardinality(buffer) <= max_buffer_len
-    /\ (mem_log_end < disk_log_start) => dirty = {}
+    /\ (mem_log_end <= disk_log_start) => dirty = {} \* TODO check actual smaller
+    /\ ~(mem_log_end < disk_log_start)
     /\ dirty \subseteq buffer
-    /\ mem_log_start <= mem_log_end + 1
-    /\ disk_log_start <= disk_log_end + 1
+    /\ mem_log_start <= mem_log_end
+    /\ disk_log_start <= disk_log_end
 
 
 Perms == Permutations(Page)
@@ -329,7 +330,7 @@ Perms == Permutations(Page)
 
 AlwaysIncrease == [][disk_log_end' > disk_log_end]_{disk_log_end}
 
-LogSubSeq == SubSeq(log', 1, disk_log_end) = SubSeq(log, 1, disk_log_end)
+LogSubSeq == SubSeq(log', 1, disk_log_end - 1) = SubSeq(log, 1, disk_log_end - 1)
 
 AlwaysIsSubSeq == [][LogSubSeq]_{log}
 
